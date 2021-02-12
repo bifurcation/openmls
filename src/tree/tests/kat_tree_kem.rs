@@ -199,6 +199,7 @@ fn generate_test_vectors() {
             let test = generate_test_vector(n_leaves, ciphersuite);
             tests.push(test);
         }
+        break;
     }
 
     write("test_vectors/kat_tree_kem_openmls-new.json", &tests);

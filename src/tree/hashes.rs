@@ -60,7 +60,7 @@ impl<'a> ParentHashInput<'a> {
             None => return Err(ParentHashError::EmptyParentNode),
         };
         let original_child_resolution = tree.original_child_resolution(child_index);
-        println!("original_child_resolution: {:?}", original_child_resolution);
+        println!("original_child_resolution ({:?}): {:x?}", index.as_u32(), original_child_resolution);
         Ok(Self {
             public_key,
             parent_hash,

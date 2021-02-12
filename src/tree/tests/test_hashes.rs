@@ -71,3 +71,38 @@ fn test_parent_hash() {
         assert!(leaf_swap_parent_hash != original_parent_hash);
     }
 }
+
+fn create_identity(
+    id: &[u8],
+    ciphersuite_name: CiphersuiteName,
+) -> (KeyPackageBundle, CredentialBundle) {
+    let signature_scheme = SignatureScheme::from(ciphersuite_name);
+    let credential_bundle =
+        CredentialBundle::new(id.to_vec(), CredentialType::Basic, signature_scheme).unwrap();
+    (
+        KeyPackageBundle::new(&[ciphersuite_name], &credential_bundle, Vec::new()).unwrap(),
+        credential_bundle,
+    )
+}
+
+#[test]
+fn parent_hash_bug() {
+    let ciphersuite = &Config::supported_ciphersuites()[0];
+
+    let mut tree = RatchetTree::init(ciphersuite);
+
+    let (kpb, _cb) = create_identity(b"First", ciphersuite.name());
+    let _ = tree.add_node(kpb.key_package());
+    let (kpb, _cb) = create_identity(b"Second", ciphersuite.name());
+    let _ = tree.add_node(kpb.key_package());
+    let (kpb, cb) = create_identity(b"Third", ciphersuite.name());
+    let _ = tree.add_node(kpb.key_package());
+
+    tree.all_parent_hashes(); // not necessary
+    assert!(tree.verify_parent_hashes().is_ok());
+
+    let mut new_tree = RatchetTree::init_from_nodes(ciphersuite, &tree.public_key_tree_copy());
+    new_tree.all_parent_hashes();
+    let (_path, _key_package_bundle) = new_tree.refresh_private_tree(&cb, &[], HashSet::new());
+    assert!(new_tree.verify_parent_hashes().is_ok());
+}

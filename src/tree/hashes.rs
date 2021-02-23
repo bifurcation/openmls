@@ -60,7 +60,6 @@ impl<'a> ParentHashInput<'a> {
             None => return Err(ParentHashError::EmptyParentNode),
         };
         let original_child_resolution = tree.original_child_resolution(child_index);
-        println!("original_child_resolution ({:?}): {:x?}", index.as_u32(), original_child_resolution);
         Ok(Self {
             public_key,
             parent_hash,
@@ -151,24 +150,24 @@ impl RatchetTree {
     /// Computes the parent hashes for a leaf node and returns the parent hash
     /// for the parent hash extension
     pub(crate) fn set_parent_hashes(&mut self, index: LeafIndex) -> Vec<u8> {
+        println!(" >>> set_parent_hashes: {:?}", NodeIndex::from(index));
+        crate::utils::_print_tree(self, "");
         // Recursive helper function used to calculate parent hashes
         fn node_parent_hash(
             tree: &mut RatchetTree,
             index: NodeIndex,
             former_index: NodeIndex,
         ) -> Vec<u8> {
+            println!(" >>> node_parent_hash: {:?} - {:?}", index, former_index);
             let tree_size = tree.leaf_count();
-            let root = treemath::root(tree_size);
+
             // When the group only has one member, there are no parent nodes
-            if tree.leaf_count().as_usize() <= 1 {
+            if tree_size.as_usize() <= 1 {
                 return vec![];
             }
 
-            // Calculate the sibling of the former index
-            // It is ok to use `unwrap()` here, since we never reach the root
-            let former_index_sibling = treemath::sibling(former_index, tree_size).unwrap();
             // If we already reached the tree's root, return the hash of that node
-            let parent_hash = if index == root {
+            let parent_hash = if index == treemath::root(tree_size) {
                 vec![]
             // Otherwise return the hash of the next parent
             } else {
@@ -178,14 +177,31 @@ impl RatchetTree {
                 let parent = treemath::parent(index, tree_size).unwrap();
                 node_parent_hash(tree, parent, index)
             };
+
             // If the current node is a parent, replace the parent hash in that node
             let current_node = &mut tree.nodes[index];
             // Get the parent node
-            if let Some(mut parent_node) = current_node.node.take() {
+            if let Some(current_node) = current_node.node.as_mut() {
                 // Set the parent hash
-                parent_node.set_parent_hash(parent_hash);
-                // Put the node back in the tree
-                tree.nodes[index].node = Some(parent_node);
+                current_node.set_parent_hash(parent_hash);
+                // Calculate the sibling of the former index
+                // It is ok to use `unwrap()` here, since we never reach the root
+                let former_index_sibling = treemath::sibling(former_index, tree_size).unwrap();
+                println!(
+                    "Calculate new parent hash for {:?} with child {:?} on {:?}.",
+                    former_index, former_index_sibling, index
+                );
+                println!(
+                    "Parent hash input: {:x?}",
+                    tree.nodes[index].node.as_ref().unwrap().parent_hash
+                );
+                println!(
+                    "Input to parent hash:\n\tparent: {:?}: {:x?}\n\tsibling: {:?}: {:x?}",
+                    index,
+                    tree.nodes[index].node.as_ref().unwrap().parent_hash,
+                    former_index_sibling,
+                    tree.original_child_resolution(former_index_sibling)
+                );
                 // Calculate the parent hash of the current node and return it
                 ParentHashInput::new(
                     tree,
@@ -203,19 +219,54 @@ impl RatchetTree {
         }
         // The same index is used for the former index here, since that parameter is
         // ignored when starting with a leaf node
-        node_parent_hash(self, index.into(), index.into())
-    }
+        // node_parent_hash(self, index.into(), index.into())
 
-    /// Computes the parent hashes for all leaf nodes and returns the parent hashes
-    /// for the parent hash extensions.
-    #[cfg(test)]
-    pub(crate) fn all_parent_hashes(&mut self) -> Vec<Vec<u8>> {
-        (0..self.nodes.len())
-            .step_by(2)
-            .map(|index| {
-                self.set_parent_hashes(LeafIndex::try_from(NodeIndex::from(index)).unwrap())
-            })
-            .collect()
+        // Get the direct path to the root for leaf `index`.
+        let tree_size = self.leaf_count();
+        let direct_path = treemath::leaf_direct_path(index, tree_size).unwrap();
+
+        // // The root gets an empty parent hash.
+        // self.nodes[direct_path.last().unwrap()]
+        //     .set_parent_hash(&[])
+        //     .unwrap();
+
+        let mut parent_hash = Vec::new();
+        if direct_path.len() == 1 && direct_path[0] == index.into() {
+            // This catches the special case where there is only one leaf,
+            // which is the root at the same time.
+            // TODO: this case needs better consideration.
+            return parent_hash;
+        }
+
+        // Now iterate over the direct path.
+        let mut iter = direct_path.iter().rev().peekable();
+        while let Some(&node_index) = iter.next() {
+            let child_index = match iter.peek() {
+                Some(i) => **i,
+                None => index.into(), // When we're out of indices take the leaf we started with.
+            };
+            let sibling_index = treemath::sibling(child_index, tree_size).unwrap();
+            println!(
+                "Input to parent hash:\n\tparent: {:?}: {:x?}\n\tsibling: {:?}: {:x?}",
+                index,
+                parent_hash,
+                sibling_index,
+                self.original_child_resolution(sibling_index)
+            );
+            // Calculate the parent hash of the current node.
+            parent_hash = ParentHashInput::new(self, node_index, sibling_index, &parent_hash)
+                // It is ok to use `unwrap()` here, since we can be sure the node is not blank
+                .unwrap()
+                .hash(self.ciphersuite);
+            if self.nodes[child_index].node_type == NodeType::Parent {
+                self.nodes[child_index]
+                    .set_parent_hash(&parent_hash)
+                    .unwrap();
+            }
+        }
+
+        // Return the leaf parent hash.
+        parent_hash
     }
 
     /// Verify the parent hash of a tree node. Returns `Ok(())` if the parent
@@ -231,13 +282,27 @@ impl RatchetTree {
             .ok_or(ParentHashError::InputNotParentNode)?;
 
         // Current hash with right child resolution
+        println!(
+            "Input to current hash right:\n\tparent: {:?}: {:x?}\n\tright: {:?}: {:x?}",
+            index,
+            parent_hash_field,
+            right,
+            self.original_child_resolution(right)
+        );
         let current_hash_right =
             ParentHashInput::new(&self, index, right, parent_hash_field)?.hash(&self.ciphersuite);
 
         // "If L.parent_hash is equal to the Parent Hash of P with Co-Path Child R, the
         // check passes"
+        println!(
+            "Left ({:?}) hash {:x?}",
+            left,
+            self.nodes[left].parent_hash()
+        );
         if let Some(left_parent_hash_field) = self.nodes[left].parent_hash() {
+            println!("current hash right {:x?}", current_hash_right);
             if left_parent_hash_field == current_hash_right {
+                println!("Left hash == current hash right");
                 return Ok(());
             }
         }
@@ -253,6 +318,10 @@ impl RatchetTree {
 
         // "If R is a leaf node, the check fails"
         if right.is_leaf() {
+            println!(
+                "verify_parent_hash: right is leaf but shouldn't {:?}",
+                right
+            );
             return Err(ParentHashError::EndedWithLeafNode);
         }
 
@@ -278,8 +347,10 @@ impl RatchetTree {
     /// hashes have successfully been verified and `false` otherwise.
     pub fn verify_parent_hashes(&self) -> Result<(), ParentHashError> {
         for (index, node) in self.nodes.iter().enumerate() {
-            if NodeIndex::from(index).is_parent() && node.is_full_parent() {
-                self.verify_parent_hash(NodeIndex::from(index), node)?;
+            let index = NodeIndex::from(index);
+            if index.is_parent() && node.is_full_parent() {
+                println!("verify_parent_hashes {:?}", index);
+                self.verify_parent_hash(index, node)?;
             }
         }
         Ok(())

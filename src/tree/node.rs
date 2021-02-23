@@ -115,6 +115,7 @@ impl Node {
         match self.node_type {
             NodeType::Parent => {
                 if let Some(node) = &self.node {
+                    // Note that the parent hash is empty for the root.
                     Some(&node.parent_hash)
                 } else {
                     None
@@ -149,6 +150,17 @@ impl Node {
     /// Get a mutable reference to the key package in this node.
     pub(crate) fn key_package_mut(&mut self) -> Option<&mut KeyPackage> {
         self.key_package.as_mut()
+    }
+
+    /// Set a new parent hash.
+    /// Returns a `TreeError::NotAParentNode` if this is not a parent node.
+    pub(crate) fn set_parent_hash(&mut self, hash: &[u8]) -> Result<(), TreeError>  {
+        if let Some(node) = self.node.as_mut() {
+            node.parent_hash = hash.to_vec();
+            Ok(())
+        } else {
+            Err(TreeError::NotAParentNode)
+        }
     }
 }
 

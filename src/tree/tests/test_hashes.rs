@@ -1,4 +1,10 @@
-use crate::tree::*;
+use std::cmp::min;
+
+use crate::{
+    extensions::{Extension, RatchetTreeExtension},
+    tree::*,
+    utils::u32_range,
+};
 
 #[test]
 fn test_parent_hash() {
@@ -85,24 +91,175 @@ fn create_identity(
     )
 }
 
+fn generate_test(n_leaves: u32, ciphersuite: &'static Ciphersuite) {
+    // The key package bundle for add_sender
+    let (kpb, cb) = create_identity(b"Tree creator", ciphersuite.name());
+
+    // The new leaf key package
+    // let (my_kpb, _my_cb) = create_identity(b"Tree creator", ciphersuite.name());
+    // let my_key_package = my_kpb.key_package().clone();
+
+    // The other key packages
+    let mut nodes = vec![kpb];
+    let mut credentials = vec![cb];
+    for leaf in 0..n_leaves - 1 {
+        let (kpb_i, cb_i) = create_identity(&leaf.to_be_bytes(), ciphersuite.name());
+        nodes.push(kpb_i);
+        credentials.push(cb_i);
+    }
+
+    // The own index (must be even)
+    let add_sender = 0u32;
+    let update_sender = 0u32;
+    println!("add_sender: {:?}", add_sender);
+    println!("update_sender: {:?}", update_sender);
+
+    // Initialise tree
+    let mut tree = RatchetTree::init(ciphersuite);
+    // crate::utils::_print_tree(&tree, "Empty Tree");
+
+    // Add leading nodes (before "self")
+    // let num_leading_nodes = (add_sender.saturating_sub(1)) as usize;
+    // nodes.iter().take(num_leading_nodes).for_each(|kpb| {
+    //     let _ = tree.add_node(kpb.key_package());
+    // });
+    // crate::utils::_print_tree(&tree, "Tree with leading nodes");
+    let (own_index, _own_cred) = tree.add_own_node(&nodes[add_sender as usize]);
+    crate::utils::_print_tree(&tree, "Tree with own node");
+
+    let index = tree.own_node_index().as_u32();
+    assert_eq!(
+        own_index.as_u32(),
+        NodeIndex::from(tree.own_node_index()).as_u32()
+    );
+
+    // Add the remaining nodes to the tree.
+    // let key_packages: Vec<&KeyPackage> =
+    println!("index: {:?}", index);
+    nodes.iter().skip(1).for_each(|kpb| {
+        let _ = tree.add_node(kpb.key_package());
+    });
+    assert_eq!(tree.leaf_count().as_u32(), n_leaves);
+
+    // Get and hash the tree before any operation.
+    // tree.all_parent_hashes();
+    assert!(tree.verify_parent_hashes().is_ok());
+    // let ratchet_tree_before = tree.public_key_tree_copy();
+    // let ratchet_tree_extension =
+    //     RatchetTreeExtension::new(ratchet_tree_before).to_extension_struct();
+    // let ratchet_tree_before_bytes = ratchet_tree_extension.extension_data();
+    // let tree_hash_before = tree.tree_hash();
+
+    // Add the new leaf for my_key_package and get the path secret for it.
+    // let my_info = tree.add_nodes(&[&my_key_package]);
+    // crate::utils::_print_tree(&tree, "Tree with added node");
+    // let (my_node_index, _my_credential) = my_info.get(0).unwrap();
+    // let mut new_indices = HashSet::new();
+    // new_indices.insert(my_node_index);
+    // let (_path, _key_package_bundle) = tree.refresh_private_tree(&cb, &[], new_indices);
+    // let my_path_secret = tree.path_secret(*my_node_index).unwrap();
+    // let my_path_secret_bytes = my_path_secret.encode_detached().unwrap();
+    // let root_secret_after_add = tree.root_secret().unwrap();
+    // let root_secret_after_add_bytes = root_secret_after_add.encode_detached().unwrap();
+
+    // `update_sender` updates the tree. We don't pick the `update_sender`
+    // as index in the tree but something a little more convenient.
+    // Because the tree implementation is so bad we have to create a new tree
+    // here for `update_sender`.
+    crate::utils::_print_tree(&tree, "Tree before copy");
+    let old_tree: Vec<Option<Node>> = tree.nodes.iter().map(|n| Some(n.clone())).collect();
+    // let sender_index = min(update_sender as usize, credentials.len() - 1);
+    // println!("Sender index: {:?}", update_sender);
+    let update_sender_cb = &credentials[update_sender as usize];
+    let update_sender_kpb = nodes.remove(update_sender as usize);
+    let mut update_sender_tree =
+        RatchetTree::new_from_nodes(ciphersuite, update_sender_kpb, &old_tree).unwrap();
+    assert_eq!(tree.nodes, update_sender_tree.nodes);
+    crate::utils::_print_tree(&update_sender_tree, "Update sender tree");
+    // update_sender_tree.all_parent_hashes();
+    let (path, _key_package_bundle) =
+        update_sender_tree.refresh_private_tree(update_sender_cb, &[], HashSet::new());
+    crate::utils::_print_tree(&update_sender_tree, "Tree after refresh");
+    // let update_path = path.encode_detached().unwrap();
+    // let root_secret_after_update = update_sender_tree.root_secret().unwrap();
+    // let root_secret_after_update_bytes = root_secret_after_update.encode_detached().unwrap();
+    assert!(update_sender_tree.verify_parent_hashes().is_ok());
+}
+
+// #[test]
+// fn parent_hash_bug() {
+//     // for _ in 0..10 {
+//     // for ciphersuite in Config::supported_ciphersuites() {
+//     let ciphersuite = &Config::supported_ciphersuites()[0];
+
+//     let mut tree = RatchetTree::init(ciphersuite);
+
+//     let (kpb_0, cb_0) = create_identity(b"First", ciphersuite.name());
+//     let _ = tree.add_own_node(&kpb_0);
+//     crate::utils::_print_tree(&tree, "Tree with own node");
+//     let (kpb, _cb) = create_identity(b"Second", ciphersuite.name());
+//     let _ = tree.add_node(kpb.key_package());
+//     // let (kpb, _cb) = create_identity(b"Third", ciphersuite.name());
+//     // let _ = tree.add_node(kpb.key_package());
+
+//     // tree.all_parent_hashes(); // not necessary
+//     crate::utils::_print_tree(&tree, "Tree before copy");
+//     assert!(tree.verify_parent_hashes().is_ok());
+
+//     let old_tree: Vec<Option<Node>> = tree.nodes.iter().map(|n| Some(n.clone())).collect();
+//     let update_sender_cb = &cb_0;
+//     let update_sender_kpb = kpb_0;
+//     let mut update_sender_tree =
+//         RatchetTree::new_from_nodes(ciphersuite, update_sender_kpb, &old_tree).unwrap();
+//     assert_eq!(tree.nodes, update_sender_tree.nodes);
+//     // update_sender_tree.all_parent_hashes();
+//     crate::utils::_print_tree(&update_sender_tree, "Update sender tree");
+//     let (path, _key_package_bundle) =
+//         update_sender_tree.refresh_private_tree(update_sender_cb, &[], HashSet::new());
+//     crate::utils::_print_tree(&update_sender_tree, "Tree after refresh");
+//     println!(
+//         " >>> Parent hash 0: {:x?}",
+//         update_sender_tree.nodes[0].parent_hash()
+//     );
+//     assert!(update_sender_tree.verify_parent_hashes().is_ok());
+
+//     println!(" ------------------------- ");
+
+//     generate_test(2, ciphersuite);
+//     // let mut new_tree =
+//     //     RatchetTree::init_from_nodes(ciphersuite, &tree.public_key_tree_copy());
+//     // new_tree.all_parent_hashes();
+//     // crate::utils::_print_tree(&new_tree, "New tree");
+//     // let (_path, _key_package_bundle) =
+//     //     new_tree.refresh_private_tree(&cb, &[], HashSet::new());
+//     // crate::utils::_print_tree(&new_tree, "New tree");
+//     // assert!(new_tree.verify_parent_hashes().is_ok());
+//     // }
+//     // }
+// }
+
 #[test]
+// #[should_panic]
 fn parent_hash_bug() {
     let ciphersuite = &Config::supported_ciphersuites()[0];
 
     let mut tree = RatchetTree::init(ciphersuite);
 
-    let (kpb, _cb) = create_identity(b"First", ciphersuite.name());
-    let _ = tree.add_node(kpb.key_package());
-    let (kpb, _cb) = create_identity(b"Second", ciphersuite.name());
-    let _ = tree.add_node(kpb.key_package());
-    let (kpb, cb) = create_identity(b"Third", ciphersuite.name());
-    let _ = tree.add_node(kpb.key_package());
-
-    tree.all_parent_hashes(); // not necessary
+    let (kpb_0, cb_0) = create_identity(b"First", ciphersuite.name());
+    let _ = tree.add_node(kpb_0.key_package());
+    let (kpb_1, cb_1) = create_identity(b"Second", ciphersuite.name());
+    let _ = tree.add_own_node(&kpb_1);
+    crate::utils::_print_tree(&tree, "Tree with own node");
+    // let (kpb_2, cb_2) = create_identity(b"Third", ciphersuite.name());
+    // let _ = tree.add_node(kpb_2.key_package());
     assert!(tree.verify_parent_hashes().is_ok());
-
-    let mut new_tree = RatchetTree::init_from_nodes(ciphersuite, &tree.public_key_tree_copy());
-    new_tree.all_parent_hashes();
-    let (_path, _key_package_bundle) = new_tree.refresh_private_tree(&cb, &[], HashSet::new());
-    assert!(new_tree.verify_parent_hashes().is_ok());
+    
+    let (path, _key_package_bundle) =
+    tree.refresh_private_tree(&cb_1, &[], HashSet::new());
+    crate::utils::_print_tree(&tree, "Tree after refresh");
+    println!(
+        " >>> Parent hash 2: {:x?}",
+        tree.nodes[2].parent_hash()
+    );
+    assert!(tree.verify_parent_hashes().is_ok());
 }

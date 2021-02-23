@@ -3,7 +3,7 @@ use crate::config::Config;
 use crate::credentials::*;
 use crate::key_packages::*;
 use crate::messages::proposals::*;
-use crate::{ciphersuite::*, prelude::PreSharedKeyID, messages::PathSecret};
+use crate::{ciphersuite::*, messages::PathSecret, prelude::PreSharedKeyID};
 
 // Tree modules
 pub(crate) mod codec;
@@ -456,6 +456,10 @@ impl RatchetTree {
         // Compute the parent hash extension and update the KeyPackage and sign it
         let parent_hash = self.set_parent_hashes(own_index);
         let key_package = self.own_key_package_mut();
+        println!(
+            "Setting new parent hash for key package  with index {:?}: {:x?}",
+            own_index, parent_hash
+        );
         key_package.update_parent_hash(&parent_hash);
         // Sign the KeyPackage
         key_package.sign(credential_bundle);

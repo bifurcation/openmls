@@ -125,7 +125,7 @@ fn create_commit_optional_path() {
         let ratchet_tree = group_alice.tree().public_key_tree_copy();
 
         // Bob creates group from Welcome
-        let group_bob = match MlsGroup::new_from_welcome(
+        let mut group_bob = match MlsGroup::new_from_welcome(
             welcome_bundle_alice_bob_option.unwrap(),
             Some(ratchet_tree),
             bob_key_package_bundle,
@@ -151,13 +151,13 @@ fn create_commit_optional_path() {
         let proposals = &[&alice_update_proposal];
 
         // Only UpdateProposal
-        let (commit_mls_plaintext, _welcome_option, kpb_option) = match group_alice.create_commit(
+        let (commit_mls_plaintext, _welcome_option, kpb_option) = match group_bob.create_commit(
             group_aad,
-            &alice_credential_bundle,
+            &bob_credential_bundle,
             proposals,
             &[],
-            false, /* force self update */
-            None,  /* PSK fetcher */
+            true, /* force self update */
+            None, /* PSK fetcher */
         ) {
             Ok(c) => c,
             Err(e) => panic!("Error creating commit: {:?}", e),
@@ -169,11 +169,21 @@ fn create_commit_optional_path() {
         assert!(commit.has_path() && kpb_option.is_some());
 
         // Apply UpdateProposal
-        group_alice
+        group_bob
             .apply_commit(
                 &commit_mls_plaintext,
                 proposals,
                 &[kpb_option.unwrap()],
+                None, /* PSK fetcher */
+            )
+            .expect("Error applying commit");
+
+        // Apply UpdateProposal
+        group_alice
+            .apply_commit(
+                &commit_mls_plaintext,
+                proposals,
+                &[],
                 None, /* PSK fetcher */
             )
             .expect("Error applying commit");

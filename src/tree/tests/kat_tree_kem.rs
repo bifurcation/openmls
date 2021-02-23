@@ -92,6 +92,10 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     } else {
         update_sender - 1
     };
+    let add_sender = 0u32;
+    let update_sender = 2u32;
+    println!("Add sender: {:?}", add_sender);
+    println!("Update sender: {:?}", update_sender);
 
     // Initialise tree
     let mut tree = RatchetTree::init(ciphersuite);
@@ -111,6 +115,7 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
         own_index.as_u32(),
         NodeIndex::from(tree.own_node_index()).as_u32()
     );
+    println!("Add sender index: {:?}", index);
 
     // Add the remaining nodes to the tree.
     // let key_packages: Vec<&KeyPackage> =
@@ -120,7 +125,7 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     assert_eq!(tree.leaf_count().as_u32(), n_leaves);
 
     // Get and hash the tree before any operation.
-    tree.all_parent_hashes();
+    // tree.all_parent_hashes();
     assert!(tree.verify_parent_hashes().is_ok());
     let ratchet_tree_before = tree.public_key_tree_copy();
     let ratchet_tree_extension =
@@ -156,10 +161,15 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
         assert_eq!(tree.nodes, new_tree.nodes);
         (new_tree, update_sender_cb)
     };
-    update_sender_tree.all_parent_hashes();
+    println!(
+        "Update sender index: {:?}",
+        NodeIndex::from(update_sender_tree.own_node_index()).as_usize()
+    );
+    // update_sender_tree.all_parent_hashes();
     crate::utils::_print_tree(&update_sender_tree, "Update sender tree");
     let (path, _key_package_bundle) =
         update_sender_tree.refresh_private_tree(update_sender_cb, &[], HashSet::new());
+    crate::utils::_print_tree(&update_sender_tree, "Refreshed update sender tree");
     let update_path = path.encode_detached().unwrap();
     let root_secret_after_update = update_sender_tree.root_secret().unwrap();
     let root_secret_after_update_bytes = root_secret_after_update.encode_detached().unwrap();
@@ -188,22 +198,22 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     }
 }
 
-#[test]
-fn generate_test_vectors() {
-    let mut tests = Vec::new();
-    const NUM_LEAVES: u32 = 2;
+// #[test]
+// fn generate_test_vectors() {
+//     let mut tests = Vec::new();
+//     const NUM_LEAVES: u32 = 2;
 
-    for ciphersuite in Config::supported_ciphersuites() {
-        for n_leaves in 1..=NUM_LEAVES {
-            println!(" Creating test case with {:?} leaves ...", n_leaves);
-            let test = generate_test_vector(n_leaves, ciphersuite);
-            tests.push(test);
-        }
-        break;
-    }
+//     for ciphersuite in Config::supported_ciphersuites() {
+//         for n_leaves in 1..=NUM_LEAVES {
+//             println!(" Creating test case with {:?} leaves ...", n_leaves);
+//             let test = generate_test_vector(n_leaves, ciphersuite);
+//             tests.push(test);
+//         }
+//         break;
+//     }
 
-    write("test_vectors/kat_tree_kem_openmls-new.json", &tests);
-}
+//     write("test_vectors/kat_tree_kem_openmls-new.json", &tests);
+// }
 
 #[test]
 fn run_test_vectors() {

@@ -88,6 +88,24 @@ impl PrivateTree {
         (private_tree, public_keys)
     }
 
+    // /// Replace the path secrets with new ones starting from the provided secret
+    // /// at the given index. Secrets between the `secret_index` and the own node
+    // /// are empty.
+    // pub(crate) fn replace_path_secrets(
+    //     &mut self,
+    //     secret_index: NodeIndex,
+    //     secret: PathSecret,
+    //     direct_path: &[NodeIndex],
+    // ) -> Result<(), TreeError> {
+    //     let index_node = direct_path.iter().find(|&&ni| ni == index).ok_or({
+    //         log::error!("Provided index is not on the direct path of the own node.");
+    //         TreeError::InvalidArguments
+    //     })?;
+    //     let 
+
+    //     Ok(())
+    // }
+
     // === Setter and Getter ===
 
     pub(crate) fn hpke_private_key(&self) -> &HPKEPrivateKey {
@@ -172,8 +190,12 @@ impl PrivateTree {
         let mut path_secrets = path_secrets;
 
         for i in 1..path.len() {
-            let path_secret =
-                path_secrets[i - 1].path_secret.kdf_expand_label(ciphersuite, "path", &[], hash_len);
+            let path_secret = path_secrets[i - 1].path_secret.kdf_expand_label(
+                ciphersuite,
+                "path",
+                &[],
+                hash_len,
+            );
             path_secrets.push(PathSecret { path_secret });
         }
         self.path_secrets = path_secrets;

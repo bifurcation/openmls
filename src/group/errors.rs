@@ -126,6 +126,8 @@ implement_error! {
                 "An error occurred in the key schedule.",
             PskError(PskError) =
                 "A PSK error occured.",
+            ParentHashError(ParentHashError) =
+                "An error during parent hash computation or validation occurred.",
         }
     }
 }

@@ -239,7 +239,6 @@ fn generate_test(n_leaves: u32, ciphersuite: &'static Ciphersuite) {
 // }
 
 #[test]
-// #[should_panic]
 fn parent_hash_bug() {
     let ciphersuite = &Config::supported_ciphersuites()[0];
 
@@ -250,8 +249,6 @@ fn parent_hash_bug() {
     let (kpb_1, cb_1) = create_identity(b"Second", ciphersuite.name());
     let _ = tree.add_own_node(&kpb_1);
     crate::utils::_print_tree(&tree, "Tree with own node");
-    // let (kpb_2, cb_2) = create_identity(b"Third", ciphersuite.name());
-    // let _ = tree.add_node(kpb_2.key_package());
     assert!(tree.verify_parent_hashes().is_ok());
     
     let (path, _key_package_bundle) =

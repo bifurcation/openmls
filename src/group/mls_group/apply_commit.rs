@@ -43,12 +43,18 @@ impl MlsGroup {
             Err(_) => return Err(ApplyCommitError::MissingProposal),
         };
 
-        // Create provisional tree and apply proposals
+        // Get the mutable tree to process.
         let mut provisional_tree = self.tree.borrow_mut();
         let apply_proposals_values =
             match provisional_tree.apply_proposals(proposal_queue, own_key_packages) {
                 Ok(res) => res,
-                Err(_) => return Err(ApplyCommitError::OwnKeyNotFound),
+                Err(e) => {
+                    log::error!(
+                        "Tree error {:?} occurred when trying to apply proposals.",
+                        e
+                    );
+                    return Err(ApplyCommitError::OwnKeyNotFound);
+                }
             };
 
         // Check if we were removed from the group
@@ -56,14 +62,14 @@ impl MlsGroup {
             return Err(ApplyCommitError::SelfRemoved);
         }
 
-        // Determine if Commit is own Commit
+        // Determine if Commit is own Commit and verify parent hash
         let sender = mls_plaintext.sender.sender;
         let is_own_commit =
             mls_plaintext.sender.to_leaf_index() == provisional_tree.own_node_index();
 
         let zero_commit_secret = CommitSecret::zero_secret(ciphersuite);
         // Determine if Commit has a path
-        let commit_secret = if let Some(path) = &commit.path {
+        let joiner_secret = if let Some(path) = &commit.path {
             // Verify KeyPackage and MLSPlaintext signature & membership tag
             // TODO #106: Support external members
             let kp = &path.leaf_key_package;
@@ -75,7 +81,8 @@ impl MlsGroup {
                 .verify_signature(serialized_context, kp.credential())
                 .map_err(ApplyCommitError::PlaintextSignatureFailure)?;
 
-            if is_own_commit {
+            let commit_secret = if is_own_commit {
+                println!(" --- Updating private tree.");
                 // Find the right KeyPackageBundle among the pending bundles and
                 // clone out the one that we need.
                 let own_kpb = match own_key_packages.iter().find(|kpb| kpb.key_package() == kp) {
@@ -92,21 +99,33 @@ impl MlsGroup {
                     &serialized_context,
                     apply_proposals_values.exclusion_list(),
                 )?
-            }
+            };
+            let joiner_secret = JoinerSecret::new(
+                ciphersuite,
+                commit_secret,
+                self.epoch_secrets
+                    .init_secret()
+                    .ok_or(ApplyCommitError::InitSecretNotFound)?,
+            );
+
+            // Check the parent hash of the sender of the commit.
+            // We always have to check this when there's a path.
+            crate::utils::_print_tree(&provisional_tree, " >>> apply_commit_internal");
+            provisional_tree.verify_leaf_parent_hash(mls_plaintext.sender.sender)?;
+
+            joiner_secret
         } else {
             if apply_proposals_values.path_required {
                 return Err(ApplyCommitError::RequiredPathNotFound);
             }
-            &zero_commit_secret
+            JoinerSecret::new(
+                ciphersuite,
+                &CommitSecret::zero_secret(ciphersuite),
+                self.epoch_secrets
+                    .init_secret()
+                    .ok_or(ApplyCommitError::InitSecretNotFound)?,
+            )
         };
-
-        let joiner_secret = JoinerSecret::new(
-            ciphersuite,
-            commit_secret,
-            self.epoch_secrets
-                .init_secret()
-                .ok_or(ApplyCommitError::InitSecretNotFound)?,
-        );
 
         // Create provisional group state
         let mut provisional_epoch = self.group_context.epoch;

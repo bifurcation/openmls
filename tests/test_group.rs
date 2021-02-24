@@ -1,4 +1,8 @@
-use openmls::prelude::*;
+use hpke::test_util::bytes_to_hex;
+use openmls::{
+    prelude::*,
+    tree::{index::NodeIndex, RatchetTree},
+};
 
 #[test]
 fn create_commit_optional_path() {
@@ -44,15 +48,6 @@ fn create_commit_optional_path() {
         )
         .unwrap();
         let bob_key_package = bob_key_package_bundle.key_package();
-
-        let alice_update_key_package_bundle = KeyPackageBundle::new(
-            &[ciphersuite.name()],
-            &alice_credential_bundle,
-            mandatory_extensions,
-        )
-        .unwrap();
-        let alice_update_key_package = alice_update_key_package_bundle.key_package();
-        assert!(alice_update_key_package.verify().is_ok());
 
         // Alice creates a group
         let group_id = [1, 2, 3, 4];
@@ -140,15 +135,22 @@ fn create_commit_optional_path() {
             group_bob.tree().public_key_tree()
         );
 
-        // Alice updates
-        let alice_update_proposal = group_alice
+        // Bob updates
+        print_tree(&group_alice.tree(), " >>> Alice' tree before update");
+        print_tree(&group_bob.tree(), " >>> Bobs tree before update");
+        let bob_update_key_package_bundle =
+            KeyPackageBundle::new(&[ciphersuite.name()], &bob_credential_bundle, vec![]).unwrap();
+        let bob_update_key_package = bob_update_key_package_bundle.key_package();
+        assert!(bob_update_key_package.verify().is_ok());
+
+        let bob_update_proposal = group_bob
             .create_update_proposal(
                 group_aad,
-                &alice_credential_bundle,
-                alice_update_key_package.clone(),
+                &bob_credential_bundle,
+                bob_update_key_package.clone(),
             )
             .expect("Could not create proposal.");
-        let proposals = &[&alice_update_proposal];
+        let proposals = &[&bob_update_proposal];
 
         // Only UpdateProposal
         let (commit_mls_plaintext, _welcome_option, kpb_option) = match group_bob.create_commit(
@@ -167,8 +169,20 @@ fn create_commit_optional_path() {
             _ => panic!(),
         };
         assert!(commit.has_path() && kpb_option.is_some());
+        print_tree(&group_bob.tree(), " >>> Bobs tree after creating commit");
 
         // Apply UpdateProposal
+        // Apply UpdateProposal
+        group_alice
+        .apply_commit(
+            &commit_mls_plaintext,
+            proposals,
+            &[],
+            None, /* PSK fetcher */
+        )
+        .expect("Error applying commit");
+        print_tree(&group_alice.tree(), " >>> Alice' tree after applying commit");
+
         group_bob
             .apply_commit(
                 &commit_mls_plaintext,
@@ -177,16 +191,7 @@ fn create_commit_optional_path() {
                 None, /* PSK fetcher */
             )
             .expect("Error applying commit");
-
-        // Apply UpdateProposal
-        group_alice
-            .apply_commit(
-                &commit_mls_plaintext,
-                proposals,
-                &[],
-                None, /* PSK fetcher */
-            )
-            .expect("Error applying commit");
+        print_tree(&group_bob.tree(), " >>> Bobs tree after applying commit");
     }
 }
 
@@ -775,5 +780,86 @@ fn group_operations() {
         let exporter_length = exporter_length + 1;
         let alice_exporter = group_alice.export_secret("export test", exporter_length);
         assert!(alice_exporter.is_err())
+    }
+}
+
+pub(crate) fn level(index: NodeIndex) -> usize {
+    let x = index.as_usize();
+    if (x & 0x01) == 0 {
+        return 0;
+    }
+    let mut k = 0;
+    while ((x >> k) & 0x01) == 1 {
+        k += 1;
+    }
+    k
+}
+
+pub(crate) fn node_width(n: usize) -> usize {
+    if n == 0 {
+        0
+    } else {
+        2 * (n - 1) + 1
+    }
+}
+
+pub(crate) fn root(size: LeafIndex) -> NodeIndex {
+    let n = size.as_usize();
+    let w = node_width(n);
+    NodeIndex::from((1usize << log2(w)) - 1)
+}
+
+pub(crate) fn log2(x: usize) -> usize {
+    if x == 0 {
+        return 0;
+    }
+    let mut k = 0;
+    while (x >> k) > 0 {
+        k += 1
+    }
+    k - 1
+}
+
+fn print_tree(tree: &RatchetTree, message: &str) {
+    let factor = 3;
+    println!("{}", message);
+    for (i, node) in tree.nodes.iter().enumerate() {
+        let level = level(NodeIndex::from(i));
+        print!("{:04}", i);
+        if !node.is_blank() {
+            let public_key = node.public_hpke_key();
+            match public_key {
+                Some(key) => print!("\tPK: {}", bytes_to_hex(&key.as_slice())),
+                None => print!("\tPK:\t\t\t"),
+            }
+            let parent_hash_bytes = node.parent_hash();
+            match parent_hash_bytes {
+                Some(parent_hash_bytes) => {
+                    let space = if parent_hash_bytes.is_empty() {
+                        "(root)\t\t\t\t\t\t\t"
+                    } else {
+                        ""
+                    };
+                    print!("\tPH: {}{}", space, bytes_to_hex(&parent_hash_bytes))
+                }
+                None => print!("\tPH: \t\t\t\t\t\t\t\t"),
+            }
+            print!("\t| ");
+            for _ in 0..level * factor {
+                print!(" ");
+            }
+            print!("◼︎");
+        } else {
+            if root(tree.leaf_count()) == NodeIndex::from(i) {
+                print!("\tB(R)\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t| ");
+            } else {
+                print!("\tB\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t| ");
+            }
+            for _ in 0..level * factor {
+                print!(" ");
+            }
+            print!("❑");
+        }
+        println!();
     }
 }

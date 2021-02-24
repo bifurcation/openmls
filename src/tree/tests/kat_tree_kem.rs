@@ -15,10 +15,11 @@
 
 use crate::{
     ciphersuite::Ciphersuite,
+    codec::Cursor,
     config::Config,
     credentials::{CredentialBundle, CredentialType},
     extensions::{Extension, RatchetTreeExtension},
-    key_packages::KeyPackageBundle,
+    key_packages::{KeyPackage, KeyPackageBundle},
     prelude::u32_range,
     test_util::{bytes_to_hex, hex_to_bytes, read, write},
     tree::{CiphersuiteName, Codec, HashSet, Node, NodeIndex, RatchetTree, SignatureScheme},
@@ -92,8 +93,8 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     } else {
         update_sender - 1
     };
-    let add_sender = 0u32;
-    let update_sender = 2u32;
+    // let add_sender = 0u32;
+    // let update_sender = 2u32;
     println!("Add sender: {:?}", add_sender);
     println!("Update sender: {:?}", update_sender);
 
@@ -124,8 +125,7 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     });
     assert_eq!(tree.leaf_count().as_u32(), n_leaves);
 
-    // Get and hash the tree before any operation.
-    // tree.all_parent_hashes();
+    // Get the tree before any operation.
     assert!(tree.verify_parent_hashes().is_ok());
     let ratchet_tree_before = tree.public_key_tree_copy();
     let ratchet_tree_extension =
@@ -165,7 +165,6 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
         "Update sender index: {:?}",
         NodeIndex::from(update_sender_tree.own_node_index()).as_usize()
     );
-    // update_sender_tree.all_parent_hashes();
     crate::utils::_print_tree(&update_sender_tree, "Update sender tree");
     let (path, _key_package_bundle) =
         update_sender_tree.refresh_private_tree(update_sender_cb, &[], HashSet::new());
@@ -198,22 +197,24 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     }
 }
 
-// #[test]
-// fn generate_test_vectors() {
-//     let mut tests = Vec::new();
-//     const NUM_LEAVES: u32 = 2;
+#[test]
+fn generate_test_vectors() {
+    let mut tests = Vec::new();
+    const NUM_LEAVES: u32 = 50;
 
-//     for ciphersuite in Config::supported_ciphersuites() {
-//         for n_leaves in 1..=NUM_LEAVES {
-//             println!(" Creating test case with {:?} leaves ...", n_leaves);
-//             let test = generate_test_vector(n_leaves, ciphersuite);
-//             tests.push(test);
-//         }
-//         break;
-//     }
+    for ciphersuite in Config::supported_ciphersuites() {
+        for n_leaves in 1..=NUM_LEAVES {
+            println!(" Creating test case with {:?} leaves ...", n_leaves);
+            let test = generate_test_vector(n_leaves, ciphersuite);
+            tests.push(test);
+        }
+        tests.push(generate_test_vector(100, ciphersuite));
+        // tests.push(generate_test_vector(1000, ciphersuite));
+        // tests.push(generate_test_vector(10_000, ciphersuite));
+    }
 
-//     write("test_vectors/kat_tree_kem_openmls-new.json", &tests);
-// }
+    write("test_vectors/kat_tree_kem_openmls-new.json", &tests);
+}
 
 #[test]
 fn run_test_vectors() {
@@ -238,7 +239,7 @@ fn run_test_vectors() {
             RatchetTreeExtension::new_from_bytes(&hex_to_bytes(&test_vector.ratchet_tree_before))
                 .expect("Error decoding ratchet tree");
         let ratchet_tree_before = tree_extension_before.into_vector();
-        let tree_before = RatchetTree::init_from_nodes(ciphersuite, &ratchet_tree_before);
+        let mut tree_before = RatchetTree::init_from_nodes(ciphersuite, &ratchet_tree_before);
         crate::utils::_print_tree(&tree_before, "Tree before");
         assert_eq!(
             hex_to_bytes(&test_vector.tree_hash_before),
@@ -261,5 +262,11 @@ fn run_test_vectors() {
         assert!(tree_after.verify_parent_hashes().is_ok());
 
         // Get test node
+        let my_key_package =
+            KeyPackage::decode(&mut Cursor::new(&hex_to_bytes(&test_vector.my_key_package)))
+                .expect("Error decoding my_key_package");
+        let (own_index, own_credential) = tree_before.add_node(&my_key_package);
+        // let common_ancestor = treemath::co
+        // tree_before.private_tree_from_secret(own_index.into(), );
     }
 }

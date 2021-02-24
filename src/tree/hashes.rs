@@ -272,6 +272,7 @@ impl RatchetTree {
     /// Verify the parent hash of a tree node. Returns `Ok(())` if the parent
     /// hash has successfully been verified and `false` otherwise.
     pub fn verify_parent_hash(&self, index: NodeIndex, node: &Node) -> Result<(), ParentHashError> {
+        println!("Verifying parent hash {:?}.", index);
         // "Let L and R be the left and right children of P, respectively"
         let left = treemath::left(index).map_err(|_| ParentHashError::InputNotParentNode)?;
         let right = treemath::right(index, self.leaf_count()).unwrap();
@@ -279,7 +280,7 @@ impl RatchetTree {
         // Extract the parent hash field
         let parent_hash_field = node
             .parent_hash()
-            .ok_or(ParentHashError::InputNotParentNode)?;
+            .ok_or(ParentHashError::ParentHashMissing)?;
 
         // Current hash with right child resolution
         println!(
@@ -316,14 +317,14 @@ impl RatchetTree {
         }
         let right = child;
 
-        // "If R is a leaf node, the check fails"
-        if right.is_leaf() {
-            println!(
-                "verify_parent_hash: right is leaf but shouldn't {:?}",
-                right
-            );
-            return Err(ParentHashError::EndedWithLeafNode);
-        }
+        // // "If R is a leaf node, the check fails"
+        // if right.is_leaf() {
+        //     println!(
+        //         "verify_parent_hash: right is leaf but shouldn't {:?}",
+        //         right
+        //     );
+        //     return Err(ParentHashError::EndedWithLeafNode);
+        // }
 
         // Current hash with left child resolution
         let current_hash_left = ParentHashInput::new(&self, index, left, parent_hash_field)
@@ -341,6 +342,25 @@ impl RatchetTree {
 
         // "Otherwise, the check fails"
         Err(ParentHashError::AllChecksFailed)
+    }
+
+    /// Verify the parent hash extension of a leaf.
+    pub(crate) fn verify_leaf_parent_hash(&self, index: LeafIndex) -> Result<(), ParentHashError> {
+        println!(
+            "Verifying parent hash for {:?} ({:x?}).",
+            index,
+            self.nodes[index].public_hpke_key()
+        );
+        let tree_size = self.leaf_count();
+        if tree_size.as_usize() == 1 || treemath::root(tree_size) == index.into() {
+            log::debug!(
+                "The tree has only one node total. We don't care about parent hashes in this case."
+            );
+            return Ok(());
+        }
+        let parent_index = treemath::parent(index.into(), tree_size).unwrap();
+        debug_assert!(parent_index != index.into());
+        self.verify_parent_hash(parent_index, &self.nodes[parent_index])
     }
 
     /// Verify the parent hashes of the tree nodes. Returns `true` if all parent

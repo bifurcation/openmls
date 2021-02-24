@@ -645,6 +645,18 @@ impl RatchetTree {
         )
     }
 
+    #[cfg(test)]
+    /// Initialize the private tree from a path secret at a given index.
+    pub(crate) fn private_tree_from_secret(
+        &mut self,
+        own_index: LeafIndex,
+        secret_index: NodeIndex,
+        secret: PathSecret,
+    ) -> Result<(), TreeError> {
+        self.private_tree = PrivateTree::new(own_index);
+        self.set_path_secrets(secret_index, secret)
+    }
+
     /// Add nodes for the provided key packages.
     /// Returns `(NodeIndex, Credential)` for each new key package.
     pub(crate) fn add_nodes(&mut self, new_kps: &[&KeyPackage]) -> Vec<(NodeIndex, Credential)> {
@@ -835,6 +847,29 @@ impl RatchetTree {
             .unwrap();
 
         self.private_tree.path_secrets().get(position)
+    }
+
+    /// Set the path secret for a given index, drop all path secrets below it and
+    /// re-compute the secrets above it.
+    pub(crate) fn set_path_secrets(
+        &mut self,
+        index: NodeIndex,
+        secret: PathSecret,
+    ) -> Result<(), TreeError> {
+        let direct_path = treemath::leaf_direct_path(self.own_node_index(), self.leaf_count())?;
+        if !direct_path.contains(&index) {
+            log::error!("Provided index is not on the direct path of the own node.");
+            return Err(TreeError::InvalidArguments);
+        }
+        // let index_node = direct_path.iter().find(|&&ni| ni == index).ok_or({
+        //     log::error!("Provided index is not on the direct path of the own node.");
+        //     TreeError::InvalidArguments
+        // })?;
+        // self.private_tree_mut().replace_path_secrets(index, secret, &direct_path);
+        self.private_tree
+            .continue_path_secrets(&self.ciphersuite, secret, &direct_path);
+
+        Ok(())
     }
 }
 

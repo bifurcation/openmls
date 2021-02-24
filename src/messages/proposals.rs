@@ -158,7 +158,7 @@ impl ProposalReference {
 
 /// Alternative representation of a Proposal, where the sender is extracted from
 /// the encapsulating MLSPlaintext and the ProposalReference is attached.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct QueuedProposal<'a> {
     proposal: &'a Proposal,
     proposal_reference: ProposalReference,
@@ -218,7 +218,7 @@ impl<'a> QueuedProposal<'a> {
 /// references to Proposals, such that, given a reference, a proposal can be
 /// accessed efficiently. To enable iteration over the queue in order, the
 /// `ProposalQueue` also contains a vector of `ProposalReference`s.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ProposalQueue<'a> {
     /// `proposal_references` holds references to the proposals in the queue and
     /// determines the order of the queue.

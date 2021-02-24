@@ -1,4 +1,4 @@
-use crate::ciphersuite::CryptoError;
+use crate::{ciphersuite::CryptoError, tree::treemath::TreeMathError};
 
 implement_error! {
     pub enum TreeError {
@@ -11,6 +11,10 @@ implement_error! {
         Complex {
             PathSecretDecryptionError(CryptoError) =
                 "Error while decrypting `PathSecret`.",
+            ParentHashError(ParentHashError) =
+                "An error during parent hash computation or validation occurred.",
+            TreeMathError(TreeMathError) =
+                "Error in a tree math calculation",
         }
     }
 }
@@ -22,5 +26,6 @@ implement_error! {
         InputNotParentNode = "The input node is not a parent node.",
         NotAParentNode = "The node is not a parent node.",
         EmptyParentNode = "The parent node was blank.",
+        ParentHashMissing = "The parent node doesn't have a parent hash set.",
     }
 }

@@ -382,9 +382,12 @@ impl RatchetTree {
             &[],
         )?));
         // Derive new path secrets and generate keypairs
-        let new_path_public_keys =
-            self.private_tree
-                .continue_path_secrets(&self.ciphersuite, secret, &common_path);
+        let new_path_public_keys = self.private_tree.continue_path_secrets(
+            &self.ciphersuite,
+            common_ancestor_index,
+            secret,
+            &common_path,
+        );
 
         // Extract public keys from UpdatePath
         let update_path_public_keys: Vec<HPKEPublicKey> = update_path
@@ -456,10 +459,10 @@ impl RatchetTree {
         // Compute the parent hash extension and update the KeyPackage and sign it
         let parent_hash = self.set_parent_hashes(own_index);
         let key_package = self.own_key_package_mut();
-        println!(
-            "Setting new parent hash for key package  with index {:?}: {:x?}",
-            own_index, parent_hash
-        );
+        // println!(
+        //     "Setting new parent hash for key package  with index {:?}: {:x?}",
+        //     own_index, parent_hash
+        // );
         key_package.update_parent_hash(&parent_hash);
         // Sign the KeyPackage
         key_package.sign(credential_bundle);
@@ -547,7 +550,7 @@ impl RatchetTree {
                         &pk,
                         group_context,
                         &[],
-                        &path_secret.path_secret,
+                        &path_secret.1.path_secret,
                     )
                 })
                 .collect();
@@ -823,8 +826,22 @@ impl RatchetTree {
         self.path_secret(self.root())
     }
 
-    /// Get the path secret for a given target node.
+    /// Get the path secret of the given target node.
     pub(crate) fn path_secret(&self, index: NodeIndex) -> Option<&PathSecret> {
+        let dirpath = match treemath::leaf_direct_path(self.own_node_index(), self.leaf_count()) {
+            Ok(p) => p,
+            Err(_) => return None,
+        };
+
+        // self.private_tree.path_secrets()
+        None
+    }
+
+    /// Get the path secret for the common ancestor of the own node and a given
+    /// target node.
+    /// Note that this function assumes that the path secrets start from the
+    /// own leaf node.
+    pub(crate) fn common_ancestor_secret(&self, index: NodeIndex) -> Option<&PathSecret> {
         // Get a Vector containing the node indices of the direct path to the
         // root from our own leaf.
         // XXX: if this should be a performance issue, it could be cached in Self.
@@ -846,7 +863,10 @@ impl RatchetTree {
             .position(|&x| x == common_ancestor_index)
             .unwrap();
 
-        self.private_tree.path_secrets().get(position)
+        self.private_tree
+            .path_secrets()
+            .get(position)
+            .map(|(node_index, path_secret)| path_secret)
     }
 
     /// Set the path secret for a given index, drop all path secrets below it and
@@ -867,7 +887,7 @@ impl RatchetTree {
         // })?;
         // self.private_tree_mut().replace_path_secrets(index, secret, &direct_path);
         self.private_tree
-            .continue_path_secrets(&self.ciphersuite, secret, &direct_path);
+            .continue_path_secrets(&self.ciphersuite, index, secret, &direct_path);
 
         Ok(())
     }

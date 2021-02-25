@@ -150,7 +150,7 @@ impl RatchetTree {
     /// Computes the parent hashes for a leaf node and returns the parent hash
     /// for the parent hash extension
     pub(crate) fn set_parent_hashes(&mut self, index: LeafIndex) -> Vec<u8> {
-        println!(" >>> set_parent_hashes: {:?}", NodeIndex::from(index));
+        // println!(" >>> set_parent_hashes: {:?}", NodeIndex::from(index));
         crate::utils::_print_tree(self, "");
         // Recursive helper function used to calculate parent hashes
         fn node_parent_hash(
@@ -158,7 +158,7 @@ impl RatchetTree {
             index: NodeIndex,
             former_index: NodeIndex,
         ) -> Vec<u8> {
-            println!(" >>> node_parent_hash: {:?} - {:?}", index, former_index);
+            // println!(" >>> node_parent_hash: {:?} - {:?}", index, former_index);
             let tree_size = tree.leaf_count();
 
             // When the group only has one member, there are no parent nodes
@@ -187,21 +187,21 @@ impl RatchetTree {
                 // Calculate the sibling of the former index
                 // It is ok to use `unwrap()` here, since we never reach the root
                 let former_index_sibling = treemath::sibling(former_index, tree_size).unwrap();
-                println!(
-                    "Calculate new parent hash for {:?} with child {:?} on {:?}.",
-                    former_index, former_index_sibling, index
-                );
-                println!(
-                    "Parent hash input: {:x?}",
-                    tree.nodes[index].node.as_ref().unwrap().parent_hash
-                );
-                println!(
-                    "Input to parent hash:\n\tparent: {:?}: {:x?}\n\tsibling: {:?}: {:x?}",
-                    index,
-                    tree.nodes[index].node.as_ref().unwrap().parent_hash,
-                    former_index_sibling,
-                    tree.original_child_resolution(former_index_sibling)
-                );
+                // println!(
+                //     "Calculate new parent hash for {:?} with child {:?} on {:?}.",
+                //     former_index, former_index_sibling, index
+                // );
+                // println!(
+                //     "Parent hash input: {:x?}",
+                //     tree.nodes[index].node.as_ref().unwrap().parent_hash
+                // );
+                // println!(
+                //     "Input to parent hash:\n\tparent: {:?}: {:x?}\n\tsibling: {:?}: {:x?}",
+                //     index,
+                //     tree.nodes[index].node.as_ref().unwrap().parent_hash,
+                //     former_index_sibling,
+                //     tree.original_child_resolution(former_index_sibling)
+                // );
                 // Calculate the parent hash of the current node and return it
                 ParentHashInput::new(
                     tree,
@@ -246,13 +246,13 @@ impl RatchetTree {
                 None => index.into(), // When we're out of indices take the leaf we started with.
             };
             let sibling_index = treemath::sibling(child_index, tree_size).unwrap();
-            println!(
-                "Input to parent hash:\n\tparent: {:?}: {:x?}\n\tsibling: {:?}: {:x?}",
-                index,
-                parent_hash,
-                sibling_index,
-                self.original_child_resolution(sibling_index)
-            );
+            // println!(
+            //     "Input to parent hash:\n\tparent: {:?}: {:x?}\n\tsibling: {:?}: {:x?}",
+            //     index,
+            //     parent_hash,
+            //     sibling_index,
+            //     self.original_child_resolution(sibling_index)
+            // );
             // Calculate the parent hash of the current node.
             parent_hash = ParentHashInput::new(self, node_index, sibling_index, &parent_hash)
                 // It is ok to use `unwrap()` here, since we can be sure the node is not blank
@@ -272,7 +272,7 @@ impl RatchetTree {
     /// Verify the parent hash of a tree node. Returns `Ok(())` if the parent
     /// hash has successfully been verified and `false` otherwise.
     pub fn verify_parent_hash(&self, index: NodeIndex, node: &Node) -> Result<(), ParentHashError> {
-        println!("Verifying parent hash {:?}.", index);
+        // println!("Verifying parent hash {:?}.", index);
         // "Let L and R be the left and right children of P, respectively"
         let left = treemath::left(index).map_err(|_| ParentHashError::InputNotParentNode)?;
         let right = treemath::right(index, self.leaf_count()).unwrap();
@@ -283,27 +283,27 @@ impl RatchetTree {
             .ok_or(ParentHashError::ParentHashMissing)?;
 
         // Current hash with right child resolution
-        println!(
-            "Input to current hash right:\n\tparent: {:?}: {:x?}\n\tright: {:?}: {:x?}",
-            index,
-            parent_hash_field,
-            right,
-            self.original_child_resolution(right)
-        );
+        // println!(
+        //     "Input to current hash right:\n\tparent: {:?}: {:x?}\n\tright: {:?}: {:x?}",
+        //     index,
+        //     parent_hash_field,
+        //     right,
+        //     self.original_child_resolution(right)
+        // );
         let current_hash_right =
             ParentHashInput::new(&self, index, right, parent_hash_field)?.hash(&self.ciphersuite);
 
         // "If L.parent_hash is equal to the Parent Hash of P with Co-Path Child R, the
         // check passes"
-        println!(
-            "Left ({:?}) hash {:x?}",
-            left,
-            self.nodes[left].parent_hash()
-        );
+        // println!(
+        //     "Left ({:?}) hash {:x?}",
+        //     left,
+        //     self.nodes[left].parent_hash()
+        // );
         if let Some(left_parent_hash_field) = self.nodes[left].parent_hash() {
-            println!("current hash right {:x?}", current_hash_right);
+            // println!("current hash right {:x?}", current_hash_right);
             if left_parent_hash_field == current_hash_right {
-                println!("Left hash == current hash right");
+                // println!("Left hash == current hash right");
                 return Ok(());
             }
         }
@@ -346,11 +346,11 @@ impl RatchetTree {
 
     /// Verify the parent hash extension of a leaf.
     pub(crate) fn verify_leaf_parent_hash(&self, index: LeafIndex) -> Result<(), ParentHashError> {
-        println!(
-            "Verifying parent hash for {:?} ({:x?}).",
-            index,
-            self.nodes[index].public_hpke_key()
-        );
+        // println!(
+        //     "Verifying parent hash for {:?} ({:x?}).",
+        //     index,
+        //     self.nodes[index].public_hpke_key()
+        // );
         let tree_size = self.leaf_count();
         if tree_size.as_usize() == 1 || treemath::root(tree_size) == index.into() {
             log::debug!(
@@ -369,7 +369,7 @@ impl RatchetTree {
         for (index, node) in self.nodes.iter().enumerate() {
             let index = NodeIndex::from(index);
             if index.is_parent() && node.is_full_parent() {
-                println!("verify_parent_hashes {:?}", index);
+                // println!("verify_parent_hashes {:?}", index);
                 self.verify_parent_hash(index, node)?;
             }
         }

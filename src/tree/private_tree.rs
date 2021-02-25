@@ -8,7 +8,7 @@ use crate::{
     messages::PathSecret,
 };
 
-pub(crate) type PathSecrets = Vec<PathSecret>;
+pub(crate) type PathSecrets = Vec<(NodeIndex, PathSecret)>;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -101,7 +101,7 @@ impl PrivateTree {
     //         log::error!("Provided index is not on the direct path of the own node.");
     //         TreeError::InvalidArguments
     //     })?;
-    //     let 
+    //     let
 
     //     Ok(())
     // }
@@ -123,8 +123,26 @@ impl PrivateTree {
     pub(crate) fn commit_secret(&self) -> &CommitSecret {
         &self.commit_secret
     }
-    pub(crate) fn path_secrets(&self) -> &[PathSecret] {
+    pub(crate) fn path_secrets(&self) -> &[(NodeIndex, PathSecret)] {
         &self.path_secrets
+    }
+
+    /// Get a reference to a path secret for a certain index on a path.
+    pub(crate) fn path_secret(&self, index: NodeIndex) -> Option<&(NodeIndex, PathSecret)> {
+        self.path_secrets
+            .iter()
+            .find(|(node_index, path_secret)| *node_index == index)
+    }
+
+    fn compute_path_secret(&self, ciphersuite: &Ciphersuite, secret: &Secret) -> PathSecret {
+        PathSecret {
+            path_secret: secret.kdf_expand_label(
+                ciphersuite,
+                "path",
+                &[],
+                ciphersuite.hash_length(),
+            ),
+        }
     }
 
     /// Generate `n` path secrets with the given `leaf_secret`.
@@ -142,17 +160,25 @@ impl PrivateTree {
         leaf_secret: &Secret,
         path: &[NodeIndex],
     ) -> Vec<HPKEPublicKey> {
-        let path_secrets = if path.is_empty() {
-            vec![]
+        // let path_secrets = if path.is_empty() {
+        //     vec![]
+        // } else {
+        //     vec![PathSecret {
+        //         path_secret: leaf_secret.kdf_expand_label(
+        //             ciphersuite,
+        //             "path",
+        //             &[],
+        //             ciphersuite.hash_length(),
+        //         ),
+        //     }]
+        // };
+        let path_secrets = if let Some(&node_index) = path.first() {
+            vec![(
+                node_index,
+                self.compute_path_secret(ciphersuite, leaf_secret),
+            )]
         } else {
-            vec![PathSecret {
-                path_secret: leaf_secret.kdf_expand_label(
-                    ciphersuite,
-                    "path",
-                    &[],
-                    ciphersuite.hash_length(),
-                ),
-            }]
+            return vec![];
         };
 
         self.derive_path_secrets(ciphersuite, path_secrets, path)
@@ -170,10 +196,11 @@ impl PrivateTree {
     pub(crate) fn continue_path_secrets(
         &mut self,
         ciphersuite: &Ciphersuite,
+        start_index: NodeIndex,
         start_secret: PathSecret,
         path: &[NodeIndex],
     ) -> Vec<HPKEPublicKey> {
-        let path_secrets = vec![start_secret];
+        let path_secrets = vec![(start_index, start_secret)];
         self.derive_path_secrets(ciphersuite, path_secrets, path)
     }
 
@@ -182,23 +209,28 @@ impl PrivateTree {
     fn derive_path_secrets(
         &mut self,
         ciphersuite: &Ciphersuite,
-        path_secrets: Vec<PathSecret>,
+        mut path_secrets: PathSecrets,
         path: &[NodeIndex],
     ) -> Vec<HPKEPublicKey> {
-        let hash_len = ciphersuite.hash_length();
+        if !path.is_empty() {
+            // path_secrets = path_secrets;
+            // let mut previous_secret = &path_secrets[0];
 
-        let mut path_secrets = path_secrets;
-
-        for i in 1..path.len() {
-            let path_secret = path_secrets[i - 1].path_secret.kdf_expand_label(
-                ciphersuite,
-                "path",
-                &[],
-                hash_len,
-            );
-            path_secrets.push(PathSecret { path_secret });
+            for (i, &node_index) in path.iter().skip(1).enumerate() {
+                // let (index, element) = &path_secrets[i - 1];
+                // let path_secret =
+                //     element
+                //         .path_secret
+                //         .kdf_expand_label(ciphersuite, "path", &[], hash_len);
+                // path_secrets.push(PathSecret { path_secret });
+                path_secrets.push((
+                    node_index,
+                    self.compute_path_secret(ciphersuite, &path_secrets[i].1.path_secret),
+                ));
+            }
         }
         self.path_secrets = path_secrets;
+        // let hash_len = ciphersuite.hash_length();
 
         // Generate the Commit Secret
         self.generate_commit_secret(ciphersuite);
@@ -218,7 +250,7 @@ impl PrivateTree {
     ///
     /// Returns a path secret that's a `CommitSecret`.
     fn generate_commit_secret(&mut self, ciphersuite: &Ciphersuite) {
-        let path_secret = self.path_secrets.last().unwrap();
+        let (_node_index, path_secret) = self.path_secrets.last().unwrap();
         self.commit_secret = CommitSecret::new(ciphersuite, &path_secret.path_secret);
     }
 
@@ -243,7 +275,7 @@ impl PrivateTree {
         let mut public_keys = vec![];
 
         // Derive key pairs for all nodes in the direct path.
-        for path_secret in self.path_secrets.iter() {
+        for (_node_index, path_secret) in self.path_secrets.iter() {
             let node_secret =
                 path_secret
                     .path_secret

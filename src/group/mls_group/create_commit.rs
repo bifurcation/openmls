@@ -241,7 +241,7 @@ impl PlaintextSecret {
             let key_package = add_proposal.key_package;
             let key_package_hash = key_package.hash();
 
-            let path_secret = provisional_tree.path_secret(index);
+            let path_secret = provisional_tree.common_ancestor_secret(index);
 
             // Create the GroupSecrets object for the respective member.
             let psks_option = if presharedkeys.psks.is_empty() {

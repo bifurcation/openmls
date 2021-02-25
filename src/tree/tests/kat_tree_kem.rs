@@ -20,13 +20,19 @@ use crate::{
     credentials::{CredentialBundle, CredentialType},
     extensions::{Extension, RatchetTreeExtension},
     key_packages::{KeyPackage, KeyPackageBundle},
+    messages::PathSecret,
     prelude::u32_range,
     test_util::{bytes_to_hex, hex_to_bytes, read, write},
-    tree::{CiphersuiteName, Codec, HashSet, Node, NodeIndex, RatchetTree, SignatureScheme},
+    tree::{
+        treemath, CiphersuiteName, Codec, HashSet, Node, NodeIndex, RatchetTree, SignatureScheme,
+    },
 };
 
 use serde::{self, Deserialize, Serialize};
-use std::{cmp::min, convert::TryFrom};
+use std::{
+    cmp::min,
+    convert::{TryFrom, TryInto},
+};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct TreeKemTestVector {
@@ -139,8 +145,20 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     let (my_node_index, _my_credential) = my_info.get(0).unwrap();
     let mut new_indices = HashSet::new();
     new_indices.insert(my_node_index);
+    let common_ancestor_index =
+        treemath::common_ancestor_index(tree.own_node_index().into(), *my_node_index);
     let (_path, _key_package_bundle) = tree.refresh_private_tree(&cb, &[], new_indices);
-    let my_path_secret = tree.path_secret(*my_node_index).unwrap();
+    // ---
+    let direct_path = treemath::leaf_direct_path(tree.own_node_index(), tree.leaf_count()).unwrap();
+    for &node_index in direct_path.iter() {
+        println!(
+            " >>> Secret at {:?}: {:x?}",
+            node_index.as_usize(),
+            tree.path_secret(node_index)
+        );
+    }
+    // ---
+    let my_path_secret = tree.path_secret(common_ancestor_index).unwrap();
     let my_path_secret_bytes = my_path_secret.encode_detached().unwrap();
     let root_secret_after_add = tree.root_secret().unwrap();
     let root_secret_after_add_bytes = root_secret_after_add.encode_detached().unwrap();
@@ -206,6 +224,48 @@ fn generate_test_vectors() {
         for n_leaves in 1..=NUM_LEAVES {
             println!(" Creating test case with {:?} leaves ...", n_leaves);
             let test = generate_test_vector(n_leaves, ciphersuite);
+
+            // XXX REMOVE - TESTING
+            println!("Test case: {:?}", test);
+            let tree_extension_before =
+                RatchetTreeExtension::new_from_bytes(&hex_to_bytes(&test.ratchet_tree_before))
+                    .expect("Error decoding ratchet tree");
+            let ratchet_tree_before = tree_extension_before.into_vector();
+            let mut tree_before = RatchetTree::init_from_nodes(ciphersuite, &ratchet_tree_before);
+            let my_key_package =
+                KeyPackage::decode(&mut Cursor::new(&hex_to_bytes(&test.my_key_package)))
+                    .expect("Error decoding my_key_package");
+            let (own_index, own_credential) = tree_before.add_node(&my_key_package);
+
+            let common_ancestor_index =
+                treemath::common_ancestor_index(NodeIndex::from(test.add_sender), own_index);
+            let my_path_secret =
+                PathSecret::decode(&mut Cursor::new(&hex_to_bytes(&test.my_path_secret)))
+                    .expect("Error decoding my_path_secret");
+            tree_before
+                .private_tree_from_secret(
+                    own_index.try_into().expect("Invalid own_index"),
+                    common_ancestor_index,
+                    my_path_secret,
+                )
+                .expect("Error setting path secrets");
+
+            // Check the root secret after the node was added.
+            let root_secret_after_add =
+                PathSecret::decode(&mut Cursor::new(&hex_to_bytes(&test.root_secret_after_add)))
+                    .expect("Error decoding root_secret_after_add");
+            let direct_path =
+                treemath::leaf_direct_path(tree_before.own_node_index(), tree_before.leaf_count()).unwrap();
+            for &node_index in direct_path.iter() {
+                println!(
+                    " +++ Secret at {:?}: {:x?}",
+                    node_index.as_usize(),
+                    tree_before.path_secret(node_index)
+                );
+            }
+            assert_eq!(&root_secret_after_add, tree_before.root_secret().unwrap());
+            // === === === ===
+
             tests.push(test);
         }
         tests.push(generate_test_vector(100, ciphersuite));
@@ -261,12 +321,30 @@ fn run_test_vectors() {
         assert!(tree_before.verify_parent_hashes().is_ok());
         assert!(tree_after.verify_parent_hashes().is_ok());
 
-        // Get test node
+        // Get test node and set path secrets on the tree for it.
         let my_key_package =
             KeyPackage::decode(&mut Cursor::new(&hex_to_bytes(&test_vector.my_key_package)))
                 .expect("Error decoding my_key_package");
         let (own_index, own_credential) = tree_before.add_node(&my_key_package);
-        // let common_ancestor = treemath::co
-        // tree_before.private_tree_from_secret(own_index.into(), );
+
+        let common_ancestor_index =
+            treemath::common_ancestor_index(NodeIndex::from(test_vector.add_sender), own_index);
+        let my_path_secret =
+            PathSecret::decode(&mut Cursor::new(&hex_to_bytes(&test_vector.my_path_secret)))
+                .expect("Error decoding my_path_secret");
+        tree_before
+            .private_tree_from_secret(
+                own_index.try_into().expect("Invalid own_index"),
+                common_ancestor_index,
+                my_path_secret,
+            )
+            .expect("Error setting path secrets");
+
+        // Check the root secret after the node was added.
+        let root_secret_after_add = PathSecret::decode(&mut Cursor::new(&hex_to_bytes(
+            &test_vector.root_secret_after_add,
+        )))
+        .expect("Error decoding root_secret_after_add");
+        assert_eq!(&root_secret_after_add, tree_before.root_secret().unwrap());
     }
 }

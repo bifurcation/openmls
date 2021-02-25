@@ -1,7 +1,7 @@
 //! Tree unit tests.
 
 mod kat_encryption;
-// mod kat_tree_kem;
+mod kat_tree_kem;
 mod kat_treemath;
 mod test_hashes;
 mod test_index;

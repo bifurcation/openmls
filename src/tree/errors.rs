@@ -7,6 +7,7 @@ implement_error! {
             InvalidUpdatePath = "The computed update path is invalid.",
             InvalidTree = "The tree is not valid.",
             NotAParentNode = "The node is not a parent node.",
+            LibraryError = "If this error is thrown, there's a bug.",
         }
         Complex {
             PathSecretDecryptionError(CryptoError) =

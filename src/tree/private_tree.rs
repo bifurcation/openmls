@@ -215,6 +215,7 @@ impl PrivateTree {
         if !path.is_empty() {
             // path_secrets = path_secrets;
             // let mut previous_secret = &path_secrets[0];
+            println!("Computing secrets for path: {:?}", path);
 
             for (i, &node_index) in path.iter().skip(1).enumerate() {
                 // let (index, element) = &path_secrets[i - 1];
@@ -230,6 +231,9 @@ impl PrivateTree {
             }
         }
         self.path_secrets = path_secrets;
+        for (i, s) in self.path_secrets.iter() {
+            println!("Computed path secret for {:?}: {:x?}", i.as_u32(), s.path_secret.to_bytes());
+        }
         // let hash_len = ciphersuite.hash_length();
 
         // Generate the Commit Secret

@@ -14,7 +14,7 @@
 //! * update path with empty exclusion list.
 
 use crate::{
-    ciphersuite::Ciphersuite,
+    ciphersuite::{Ciphersuite, Secret},
     codec::Cursor,
     config::Config,
     credentials::{CredentialBundle, CredentialType},
@@ -24,7 +24,8 @@ use crate::{
     prelude::u32_range,
     test_util::{bytes_to_hex, hex_to_bytes, read, write},
     tree::{
-        treemath, CiphersuiteName, Codec, HashSet, Node, NodeIndex, RatchetTree, SignatureScheme,
+        index::LeafIndex, treemath, CiphersuiteName, Codec, HashSet, Node, NodeIndex, RatchetTree,
+        SignatureScheme, UpdatePath,
     },
 };
 
@@ -44,6 +45,7 @@ struct TreeKemTestVector {
     add_sender: u32,
     my_key_package: String,
     my_path_secret: String,
+    my_leaf_secret: String,
 
     update_sender: u32,
     update_path: String,
@@ -99,8 +101,8 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     } else {
         update_sender - 1
     };
-    // let add_sender = 0u32;
-    // let update_sender = 2u32;
+    // let add_sender = 6u32;
+    // let update_sender = 6u32;
     println!("Add sender: {:?}", add_sender);
     println!("Update sender: {:?}", update_sender);
 
@@ -118,6 +120,7 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     crate::utils::_print_tree(&tree, "Tree with own node");
 
     let index = tree.own_node_index().as_u32();
+    let add_sender = NodeIndex::from(tree.own_node_index()).as_u32();
     assert_eq!(
         own_index.as_u32(),
         NodeIndex::from(tree.own_node_index()).as_u32()
@@ -149,6 +152,7 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
         treemath::common_ancestor_index(tree.own_node_index().into(), *my_node_index);
     let (_path, _key_package_bundle) = tree.refresh_private_tree(&cb, &[], new_indices);
     // ---
+    println!(" >>> Common ancestor: {:?}", common_ancestor_index.as_u32());
     let direct_path = treemath::leaf_direct_path(tree.own_node_index(), tree.leaf_count()).unwrap();
     for &node_index in direct_path.iter() {
         println!(
@@ -160,6 +164,8 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     // ---
     let my_path_secret = tree.path_secret(common_ancestor_index).unwrap();
     let my_path_secret_bytes = my_path_secret.encode_detached().unwrap();
+    let my_leaf_secret = my_kpb.leaf_secret();
+    let my_leaf_secret_bytes = my_leaf_secret.encode_detached().unwrap();
     let root_secret_after_add = tree.root_secret().unwrap();
     let root_secret_after_add_bytes = root_secret_after_add.encode_detached().unwrap();
 
@@ -187,6 +193,11 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     let (path, _key_package_bundle) =
         update_sender_tree.refresh_private_tree(update_sender_cb, &[], HashSet::new());
     crate::utils::_print_tree(&update_sender_tree, "Refreshed update sender tree");
+    // ====
+    for node in path.nodes.iter() {
+        println!("Update path node pk: {:x?}", node.public_key.as_slice());
+    }
+    // ====
     let update_path = path.encode_detached().unwrap();
     let root_secret_after_update = update_sender_tree.root_secret().unwrap();
     let root_secret_after_update_bytes = root_secret_after_update.encode_detached().unwrap();
@@ -205,7 +216,8 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
         add_sender,
         my_key_package: bytes_to_hex(&my_key_package.encode_detached().unwrap()),
         my_path_secret: bytes_to_hex(&my_path_secret_bytes),
-        update_sender,
+        my_leaf_secret: bytes_to_hex(&my_leaf_secret_bytes),
+        update_sender: NodeIndex::from(update_sender_tree.own_node_index()).as_u32(),
         update_path: bytes_to_hex(&update_path),
         tree_hash_before: bytes_to_hex(&tree_hash_before),
         root_secret_after_add: bytes_to_hex(&root_secret_after_add_bytes),
@@ -218,7 +230,7 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
 #[test]
 fn generate_test_vectors() {
     let mut tests = Vec::new();
-    const NUM_LEAVES: u32 = 50;
+    const NUM_LEAVES: u32 = 15;
 
     for ciphersuite in Config::supported_ciphersuites() {
         for n_leaves in 1..=NUM_LEAVES {
@@ -239,23 +251,35 @@ fn generate_test_vectors() {
 
             let common_ancestor_index =
                 treemath::common_ancestor_index(NodeIndex::from(test.add_sender), own_index);
+            println!(" +++ Common ancestor: {:?}", common_ancestor_index.as_u32());
             let my_path_secret =
                 PathSecret::decode(&mut Cursor::new(&hex_to_bytes(&test.my_path_secret)))
                     .expect("Error decoding my_path_secret");
+            let my_leaf_secret =
+                Secret::decode(&mut Cursor::new(&hex_to_bytes(&test.my_leaf_secret)))
+                    .expect("Error decoding my_leaf_secret");
             tree_before
-                .private_tree_from_secret(
+                .private_tree_mut().(
                     own_index.try_into().expect("Invalid own_index"),
                     common_ancestor_index,
                     my_path_secret,
                 )
                 .expect("Error setting path secrets");
+            // tree_before
+            //     .private_tree_from_secret(
+            //         own_index.try_into().expect("Invalid own_index"),
+            //         common_ancestor_index,
+            //         my_path_secret,
+            //     )
+            //     .expect("Error setting path secrets");
 
             // Check the root secret after the node was added.
             let root_secret_after_add =
                 PathSecret::decode(&mut Cursor::new(&hex_to_bytes(&test.root_secret_after_add)))
                     .expect("Error decoding root_secret_after_add");
             let direct_path =
-                treemath::leaf_direct_path(tree_before.own_node_index(), tree_before.leaf_count()).unwrap();
+                treemath::leaf_direct_path(tree_before.own_node_index(), tree_before.leaf_count())
+                    .unwrap();
             for &node_index in direct_path.iter() {
                 println!(
                     " +++ Secret at {:?}: {:x?}",
@@ -264,6 +288,19 @@ fn generate_test_vectors() {
                 );
             }
             assert_eq!(&root_secret_after_add, tree_before.root_secret().unwrap());
+
+            // Process the update.
+            let update_path =
+                UpdatePath::decode(&mut Cursor::new(&hex_to_bytes(&test.update_path)))
+                    .expect("Error decoding update_path");
+            // tree_before
+            //     .update_path(
+            //         LeafIndex::from(test.update_sender),
+            //         &update_path,
+            //         &[],
+            //         HashSet::new(),
+            //     )
+            //     .expect("Error updating path");
             // === === === ===
 
             tests.push(test);
@@ -281,6 +318,7 @@ fn run_test_vectors() {
     let tests: Vec<TreeKemTestVector> = read("test_vectors/kat_tree_kem_openmls.json");
 
     for test_vector in tests {
+        println!("Test case: {:?}", test_vector);
         let ciphersuite =
             CiphersuiteName::try_from(test_vector.cipher_suite).expect("Invalid ciphersuite");
         let ciphersuite = match Config::ciphersuite(ciphersuite) {
@@ -346,5 +384,18 @@ fn run_test_vectors() {
         )))
         .expect("Error decoding root_secret_after_add");
         assert_eq!(&root_secret_after_add, tree_before.root_secret().unwrap());
+
+        // Process the update.
+        let update_path =
+            UpdatePath::decode(&mut Cursor::new(&hex_to_bytes(&test_vector.update_path)))
+                .expect("Error decoding update_path");
+        tree_before
+            .update_path(
+                LeafIndex::from(test_vector.update_sender),
+                &update_path,
+                &[],
+                HashSet::new(),
+            )
+            .expect("Error updating path");
     }
 }

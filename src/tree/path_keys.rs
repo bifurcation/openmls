@@ -37,4 +37,9 @@ impl PathKeys {
     pub fn get(&self, index: NodeIndex) -> Option<&HPKEPrivateKey> {
         self.keys.get(&index)
     }
+
+    /// Get the number of path keys.
+    pub(crate) fn len(&self) -> usize {
+        self.keys.len()
+    }
 }

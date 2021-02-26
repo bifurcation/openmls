@@ -280,6 +280,8 @@ impl RatchetTree {
         free_leaves
     }
 
+    pub(crate) fn update_private_path(&mut self) {}
+
     /// 7.7. Update Paths
     ///
     /// Update the path for incoming commits.
@@ -323,6 +325,19 @@ impl RatchetTree {
         let own_direct_path = treemath::leaf_direct_path(self.own_node_index(), tree_size).unwrap();
 
         // Resolve the node of that co-path index
+        println!(" --- update_path sender_direct_path: {:?}", sender_direct_path);
+        println!(" --- update_path own_direct_path: {:?}", own_direct_path);
+        println!(" --- update_path common_ancestor_sender_dirpath_index: {:?}", common_ancestor_sender_dirpath_index);
+        println!(" --- update_path");
+        for node in update_path.nodes.iter() {
+            println!("\t{:?}", node.encrypted_path_secret.len());
+        }
+        println!(
+            " --- update_path \n\tsender: {:?}\n\tcommon_ancestor_copath_index: {:?}\n\town_index: {:?}",
+            NodeIndex::from(sender),
+            common_ancestor_copath_index,
+            NodeIndex::from(self.own_node_index())
+        );
         let resolution = self.resolve(common_ancestor_copath_index, &new_leaves_indexes);
         println!(" --- update_path resolution: {:?}", resolution);
 
@@ -343,6 +358,16 @@ impl RatchetTree {
                 Some(node) => node,
                 None => return Err(TreeError::InvalidArguments),
             };
+        for encrypted_secret in common_ancestor_node.encrypted_path_secret.iter() {
+            println!(
+                " --- update_path encrypted path secrets: {:?}",
+                encrypted_secret
+            );
+        }
+        println!(
+            " --- update_path position_in_resolution: {:?}",
+            position_in_resolution
+        );
         debug_assert_eq!(
             resolution.len(),
             common_ancestor_node.encrypted_path_secret.len()
@@ -355,23 +380,7 @@ impl RatchetTree {
         // Get the HPKE private key.
         // It's either the own key or must be in the path of the private tree.
         let private_key = if resolution[position_in_resolution] == own_index {
-            // if resolution.len() != 1 {
-                self.private_tree.hpke_private_key()
-            // } else {
-            //     println!(
-            //         " --- update_path path_keys: {:?}",
-            //         self.private_tree.path_keys()
-            //     );
-            //     debug_assert!(resolution.len() == 1);
-            //     debug_assert!(self.private_tree.path_keys().len() == 1);
-            //     if self.private_tree.path_keys().len() != 1 || resolution.len() != 1 {
-            //         return Err(TreeError::LibraryError);
-            //     }
-            //     self.private_tree
-            //         .path_keys()
-            //         .get(treemath::root(tree_size))
-            //         .ok_or(TreeError::LibraryError)?
-            // }
+            self.private_tree.hpke_private_key()
         } else {
             match self
                 .private_tree
@@ -382,6 +391,8 @@ impl RatchetTree {
                 None => return Err(TreeError::InvalidArguments),
             }
         };
+
+        // self.update_private_path(common_ancestor_index);
 
         // Compute the common path between the common ancestor and the root
         let common_path = treemath::parent_direct_path(common_ancestor_index, self.leaf_count())
@@ -558,6 +569,10 @@ impl RatchetTree {
 
         let mut direct_path_nodes = vec![];
         let mut ciphertexts = vec![];
+        println!(
+            " --- Encrypting path secrets {:x?} \nfor copath {:x?}",
+            path_secrets, copath
+        );
         for (path_secret, copath_node) in path_secrets.iter().zip(copath.iter()) {
             let node_ciphertexts: Vec<HpkeCiphertext> = self
                 .resolve(*copath_node, &new_leaves_indexes)
@@ -659,6 +674,19 @@ impl RatchetTree {
         (index, credential)
     }
 
+    // Initialise the private tree from the leaf secret.
+    pub(crate) fn private_tree_from_leaf_secret(
+        &mut self,
+        own_index: LeafIndex,
+        leaf_secret: Secret,
+    ) -> Result<(), TreeError> {
+        let direct_path = treemath::leaf_direct_path(own_index, self.leaf_count())?;
+        let (private_tree, new_public_keys) =
+            PrivateTree::from_secret(own_index, self.ciphersuite, &leaf_secret, &direct_path);
+        self.private_tree = private_tree;
+        self.merge_public_keys(&new_public_keys, &direct_path)
+    }
+
     // Add a node for the provided key package the tree.
     pub(crate) fn add_node(&mut self, key_package: &KeyPackage) -> (NodeIndex, Credential) {
         if !self.nodes.is_empty() {
@@ -673,13 +701,14 @@ impl RatchetTree {
 
     #[cfg(test)]
     /// Initialize the private tree from a path secret at a given index.
-    pub(crate) fn private_tree_from_secret(
+    /// This assumes that the private tree has been initialised alread and updates
+    /// the private tree starting with the given index.
+    pub(crate) fn update_private_tree(
         &mut self,
-        own_index: LeafIndex,
         secret_index: NodeIndex,
         secret: PathSecret,
     ) -> Result<(), TreeError> {
-        self.private_tree = PrivateTree::new(own_index);
+        // self.private_tree = PrivateTree::new(own_index);
         self.set_path_secrets(secret_index, secret)
     }
 
@@ -892,7 +921,10 @@ impl RatchetTree {
         self.private_tree
             .path_secrets()
             .get(position)
-            .map(|(node_index, path_secret)| path_secret)
+            .map(|(node_index, path_secret)| {
+                debug_assert!(node_index == &common_ancestor_index);
+                path_secret
+            })
     }
 
     /// Set the path secret for a given index, drop all path secrets below it and

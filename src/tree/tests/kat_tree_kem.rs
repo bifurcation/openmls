@@ -101,8 +101,8 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
     } else {
         update_sender - 1
     };
-    // let add_sender = 6u32;
-    // let update_sender = 6u32;
+    let add_sender = 2u32;
+    let update_sender = 0u32;
     println!("Add sender: {:?}", add_sender);
     println!("Update sender: {:?}", update_sender);
 
@@ -230,10 +230,10 @@ fn generate_test_vector(n_leaves: u32, ciphersuite: &'static Ciphersuite) -> Tre
 #[test]
 fn generate_test_vectors() {
     let mut tests = Vec::new();
-    const NUM_LEAVES: u32 = 15;
+    const NUM_LEAVES: u32 = 5;
 
     for ciphersuite in Config::supported_ciphersuites() {
-        for n_leaves in 1..=NUM_LEAVES {
+        for n_leaves in 3..=NUM_LEAVES {
             println!(" Creating test case with {:?} leaves ...", n_leaves);
             let test = generate_test_vector(n_leaves, ciphersuite);
 
@@ -259,24 +259,11 @@ fn generate_test_vectors() {
                 Secret::decode(&mut Cursor::new(&hex_to_bytes(&test.my_leaf_secret)))
                     .expect("Error decoding my_leaf_secret");
             tree_before
-                .private_tree_mut().(
+                .private_tree_from_leaf_secret(
                     own_index.try_into().expect("Invalid own_index"),
-                    common_ancestor_index,
-                    my_path_secret,
+                    my_leaf_secret,
                 )
-                .expect("Error setting path secrets");
-            // tree_before
-            //     .private_tree_from_secret(
-            //         own_index.try_into().expect("Invalid own_index"),
-            //         common_ancestor_index,
-            //         my_path_secret,
-            //     )
-            //     .expect("Error setting path secrets");
-
-            // Check the root secret after the node was added.
-            let root_secret_after_add =
-                PathSecret::decode(&mut Cursor::new(&hex_to_bytes(&test.root_secret_after_add)))
-                    .expect("Error decoding root_secret_after_add");
+                .expect("Error initialising private tree");
             let direct_path =
                 treemath::leaf_direct_path(tree_before.own_node_index(), tree_before.leaf_count())
                     .unwrap();
@@ -287,25 +274,48 @@ fn generate_test_vectors() {
                     tree_before.path_secret(node_index)
                 );
             }
+            tree_before
+                .update_private_tree(common_ancestor_index, my_path_secret)
+                .expect("Error setting path secrets");
+            for &node_index in direct_path.iter() {
+                println!(
+                    " +++ Secret at {:?} (after update): {:x?}",
+                    node_index.as_usize(),
+                    tree_before.path_secret(node_index)
+                );
+            }
+
+            // Check the root secret after the node was added.
+            let root_secret_after_add =
+                PathSecret::decode(&mut Cursor::new(&hex_to_bytes(&test.root_secret_after_add)))
+                    .expect("Error decoding root_secret_after_add");
             assert_eq!(&root_secret_after_add, tree_before.root_secret().unwrap());
 
             // Process the update.
             let update_path =
                 UpdatePath::decode(&mut Cursor::new(&hex_to_bytes(&test.update_path)))
                     .expect("Error decoding update_path");
-            // tree_before
-            //     .update_path(
-            //         LeafIndex::from(test.update_sender),
-            //         &update_path,
-            //         &[],
-            //         HashSet::new(),
-            //     )
-            //     .expect("Error updating path");
+            let _commit_secret = tree_before
+                .update_path(
+                    LeafIndex::from(test.update_sender),
+                    &update_path,
+                    &[],
+                    HashSet::new(),
+                )
+                .expect("Error updating path");
+            let root_secret_after_update = PathSecret::decode(&mut Cursor::new(&hex_to_bytes(
+                &test.root_secret_after_update,
+            )))
+            .expect("Error decoding root_secret_after_update");
+            assert_eq!(
+                &root_secret_after_update,
+                tree_before.root_secret().unwrap()
+            );
             // === === === ===
 
             tests.push(test);
         }
-        tests.push(generate_test_vector(100, ciphersuite));
+        // tests.push(generate_test_vector(100, ciphersuite));
         // tests.push(generate_test_vector(1000, ciphersuite));
         // tests.push(generate_test_vector(10_000, ciphersuite));
     }
@@ -371,11 +381,7 @@ fn run_test_vectors() {
             PathSecret::decode(&mut Cursor::new(&hex_to_bytes(&test_vector.my_path_secret)))
                 .expect("Error decoding my_path_secret");
         tree_before
-            .private_tree_from_secret(
-                own_index.try_into().expect("Invalid own_index"),
-                common_ancestor_index,
-                my_path_secret,
-            )
+            .update_private_tree(common_ancestor_index, my_path_secret)
             .expect("Error setting path secrets");
 
         // Check the root secret after the node was added.
